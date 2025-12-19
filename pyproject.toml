@@ -1,0 +1,35 @@
+[tool.ruff]
+line-length = 88
+target-version = "py312"  # Change to "py311" if your prod uses Python 3.11
+extend-exclude = ["migrations"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.testing"
+
+python_files = [
+    "tests.py",
+    "test_*.py",
+    "*_tests.py",
+]
+
+addopts = [
+    "--strict-markers",
+    "--reuse-db",
+    "-v",
+]
+
+filterwarnings = [
+    "ignore:app_settings\\.USERNAME_REQUIRED is deprecated:UserWarning:dj_rest_auth.registration.serializers",
+    "ignore:app_settings\\.EMAIL_REQUIRED is deprecated:UserWarning:dj_rest_auth.registration.serializers",
+]

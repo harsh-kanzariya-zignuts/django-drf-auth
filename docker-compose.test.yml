@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    tmpfs:
+      - /var/lib/postgresql/data  # In-memory for speed
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.testing
+      POSTGRES_HOST: db
+      POSTGRES_DB: testdb
+      POSTGRES_USER: testuser
+      POSTGRES_PASSWORD: testpass
+    depends_on:
+      db:
+        condition: service_started
+    command: >
+      sh -c "
+      python manage.py migrate --noinput &&
+      pytest -v --cov=apps --cov-report=term-missing --cov-report=html
+      "

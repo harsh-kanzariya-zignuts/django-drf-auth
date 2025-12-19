@@ -1,0 +1,11 @@
+Hi {{ user.get_username }},
+
+Welcome!
+
+Please confirm your email address by clicking the link below:
+
+{{ activate_url }}
+
+If you did not create this account, you can safely ignore this email.
+
+— {{ site.name }}

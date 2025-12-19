@@ -1,0 +1,15 @@
+-r base.txt
+
+# Development tools
+django-debug-toolbar>=6.1.0  # Latest: 6.1.0; full Django 5.2 support
+ipython>=9.8.0               # Latest: 9.8.0; enhanced shell
+django-extensions>=4.1.0     # Latest: 4.1.0; shell_plus and more
+
+# Testing
+pytest>=9.0.0                # Latest: 9.0.2
+pytest-django>=4.11.0        # Latest: 4.11.1; safe range
+pytest-cov>=7.0.0            # Latest: 7.0.0; coverage reports
+factory-boy>=3.3.0           # Latest: 3.3.3; fixtures
+
+# Code quality
+ruff>=0.14.0                 # Latest: 0.14.9; linter + formatter + sorter

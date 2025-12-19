@@ -1,0 +1,61 @@
+# Django
+
+*.log
+*.pot
+*.pyc
+**pycache**/
+db.sqlite3
+media/
+
+# Environments
+
+venv/
+env/
+ENV/
+*.env
+*.venv
+
+# IDE / Editor
+
+.vscode/
+.idea/
+*.swp
+
+# MacOS
+
+.DS_Store
+
+# Python
+
+*.py[cod]
+*$py.class
+
+# Migrations (optional – keep if you want to track migrations)
+
+# **Do NOT remove if you want migrations in git**
+
+# api/migrations/
+
+# Byte-compiled / cache
+
+*.so
+*.retry
+
+# Coverage
+
+htmlcov/
+.coverage
+.coverage.*
+.cache
+
+# Node (if using a frontend)
+
+node_modules/
+npm-debug.log
+
+# Other
+
+staticfiles/
+
+.pytest_cache/
+.ruff_cache/
