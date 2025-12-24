@@ -2,6 +2,7 @@
 from dj_rest_auth.serializers import JWTSerializer as BaseJWTSerializer
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -27,7 +28,9 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 class RegisterSerializer(serializers.ModelSerializer):
     """
-    Serializer for user registration with UUID support
+    Serializer for user registration
+    
+    Returns JWT tokens and user data upon successful registration
     """
 
     password = serializers.CharField(
@@ -117,6 +120,8 @@ class RegisterSerializer(serializers.ModelSerializer):
 class LoginSerializer(serializers.Serializer):
     """
     Serializer for user login
+    
+    Returns JWT tokens and user data upon successful authentication
     """
 
     email = serializers.EmailField(required=True)
@@ -155,6 +160,7 @@ class CustomJWTSerializer(BaseJWTSerializer):
     class Meta:
         fields = ["access", "refresh", "user"]
 
+    @extend_schema_field(UserSerializer)
     def get_user(self, obj):
         """
         Include full user data in JWT response
@@ -177,7 +183,11 @@ class CustomJWTSerializer(BaseJWTSerializer):
 
 
 class ChangePasswordSerializer(serializers.Serializer):
-    """Serializer for password change"""
+    """
+    Serializer for password change
+    
+    Requires old password verification before setting new password
+    """
 
     old_password = serializers.CharField(
         required=True, write_only=True, style={"input_type": "password"}
@@ -202,3 +212,16 @@ class ChangePasswordSerializer(serializers.Serializer):
                 {"new_password": "Password fields didn't match."}
             )
         return attrs
+
+
+class SocialLoginSerializer(serializers.Serializer):
+    """
+    Serializer for social OAuth login
+    
+    Accepts access token from OAuth provider
+    """
+    
+    access_token = serializers.CharField(
+        required=True,
+        help_text="OAuth access token from provider (Google, Facebook, GitHub)"
+    )

@@ -25,3 +25,5 @@ rich==14.2.0
 sqlparse==0.5.4
 urllib3==2.6.2
 whitenoise==6.11.0
+drf-spectacular==0.29.0
+drf-spectacular-sidecar==2025.12.1

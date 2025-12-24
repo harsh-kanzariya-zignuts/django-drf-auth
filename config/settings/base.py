@@ -14,6 +14,9 @@ SECRET_KEY = env("DJANGO_SECRET_KEY")
 DEBUG = env("DJANGO_DEBUG")
 ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS", default=[])
 
+# Environment variable for docs protection
+DJANGO_ENV = env("DJANGO_ENV", default="production")
+
 # Applications
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -31,6 +34,8 @@ INSTALLED_APPS = [
     "rest_framework.authtoken",  # Required by dj_rest_auth
     "corsheaders",
     "whitenoise.runserver_nostatic",
+    "drf_spectacular",
+    "drf_spectacular_sidecar",
 
     # Authentication
     "allauth",
@@ -153,6 +158,9 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ],
+
+    # ADD SPECTACULAR SETTINGS
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
 }
 
 # JWT Settings (Updated for UUID support)
@@ -365,4 +373,76 @@ LOGGING = {
             "propagate": False,
         },
     },
+}
+
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Django Auth API",
+    "DESCRIPTION": """
+    Complete authentication API with:
+    - Email/Password Authentication
+    - Social OAuth (Google, Facebook, GitHub)
+    - JWT Token Management
+    - Email Verification
+    - Password Reset
+    - User Profile Management
+    - Audit Trail & Soft Delete
+    """,
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    
+    # JWT Authentication
+    "AUTHENTICATION_CLASSES": [
+        "drf_spectacular.contrib.rest_framework_simplejwt.SimpleJWTScheme",
+    ],
+    "COMPONENT_SPLIT_REQUEST": True,
+
+    # For Offline/static Swagger UI
+    "SWAGGER_UI_DIST": "SIDECAR",
+    "SWAGGER_UI_FAVICON_HREF": "SIDECAR",
+    "REDOC_DIST": "SIDECAR",
+    
+    # UI Customization
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "persistAuthorization": True,
+        "displayOperationId": True,
+        "filter": True,
+    },
+    
+    # Schema generation
+    "SCHEMA_PATH_PREFIX": r"/api/",
+    "SCHEMA_PATH_PREFIX_TRIM": True,
+    
+    # Enum behavior
+    "ENUM_NAME_OVERRIDES": {
+        "ValidationErrorEnum": "drf_spectacular.openapi.ValidationErrorEnum.choices",
+    },
+    
+    
+    # Contact info
+    "CONTACT": {
+        "name": "API Support",
+        "email": "support@example.com",
+    },
+    
+    # License
+    "LICENSE": {
+        "name": "MIT License",
+    },
+    
+    # Tags
+    "TAGS": [
+        {"name": "Authentication", "description": "User registration, login, logout"},
+        {"name": "Profile", "description": "User profile management"},
+        {"name": "Password", "description": "Password change and reset"},
+        {"name": "Social Auth", "description": "OAuth social authentication"},
+    ],
+
+    "SERVERS": [
+        {
+            "url": "http://127.0.0.1:8000/api",
+            "description": "Local development server",
+        },
+    ],
 }
