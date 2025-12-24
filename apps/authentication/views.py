@@ -20,6 +20,17 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.serializers import UpdateUserSerializer, UserSerializer
 
+from .schemas import (
+    change_password_schema,
+    disconnect_social_schema,
+    facebook_login_schema,
+    github_login_schema,
+    google_login_schema,
+    logout_schema,
+    profile_get_schema,
+    profile_update_schema,
+    social_accounts_schema,
+)
 from .serializers import (
     ChangePasswordSerializer,
 )
@@ -32,6 +43,7 @@ sensitive_post_parameters_m = method_decorator(
 )
 
 
+@google_login_schema
 class GoogleLogin(SocialLoginView):
     """
     Google OAuth2 Login
@@ -44,6 +56,7 @@ class GoogleLogin(SocialLoginView):
     client_class = OAuth2Client
 
 
+@facebook_login_schema
 class FacebookLogin(SocialLoginView):
     """
     Facebook OAuth2 Login
@@ -56,6 +69,7 @@ class FacebookLogin(SocialLoginView):
     client_class = OAuth2Client
 
 
+@github_login_schema
 class GitHubLogin(SocialLoginView):
     """
     GitHub OAuth2 Login
@@ -68,6 +82,7 @@ class GitHubLogin(SocialLoginView):
     client_class = OAuth2Client
 
 
+@social_accounts_schema
 class SocialAccountsView(APIView):
     """
     List connected social accounts
@@ -101,6 +116,7 @@ class SocialAccountsView(APIView):
         return Response(data)
 
 
+@disconnect_social_schema
 class DisconnectSocialAccountView(APIView):
     """
     Disconnect a social account
@@ -147,6 +163,7 @@ class DisconnectSocialAccountView(APIView):
             )
 
 
+@profile_get_schema
 class UserProfileView(generics.RetrieveAPIView):
     """
     Get current user profile
@@ -160,6 +177,7 @@ class UserProfileView(generics.RetrieveAPIView):
         return self.request.user
 
 
+@profile_update_schema
 class UpdateProfileView(generics.UpdateAPIView):
     """
     Update user profile with audit trail
@@ -179,6 +197,7 @@ class UpdateProfileView(generics.UpdateAPIView):
         return context
 
 
+@change_password_schema
 class ChangePasswordView(APIView):
     """
     Change user password
@@ -218,6 +237,7 @@ class ChangePasswordView(APIView):
         )
 
 
+@logout_schema
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def logout_view(request):
