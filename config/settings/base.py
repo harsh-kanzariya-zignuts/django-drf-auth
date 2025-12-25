@@ -408,17 +408,12 @@ SPECTACULAR_SETTINGS = {
         "persistAuthorization": True,
         "displayOperationId": True,
         "filter": True,
+        "defaultModelsExpandDepth": -1,
     },
     
     # Schema generation
     "SCHEMA_PATH_PREFIX": r"/api/",
     "SCHEMA_PATH_PREFIX_TRIM": True,
-    
-    # Enum behavior
-    "ENUM_NAME_OVERRIDES": {
-        "ValidationErrorEnum": "drf_spectacular.openapi.ValidationErrorEnum.choices",
-    },
-    
     
     # Contact info
     "CONTACT": {
@@ -430,14 +425,6 @@ SPECTACULAR_SETTINGS = {
     "LICENSE": {
         "name": "MIT License",
     },
-    
-    # Tags
-    "TAGS": [
-        {"name": "Authentication", "description": "User registration, login, logout"},
-        {"name": "Profile", "description": "User profile management"},
-        {"name": "Password", "description": "Password change and reset"},
-        {"name": "Social Auth", "description": "OAuth social authentication"},
-    ],
 
     "SERVERS": [
         {

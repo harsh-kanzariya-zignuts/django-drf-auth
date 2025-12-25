@@ -6,7 +6,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from apps.users.serializers import UserSerializer
+from apps.users.serializers import MinimalUserSerializer
 
 User = get_user_model()
 
@@ -160,7 +160,7 @@ class CustomJWTSerializer(BaseJWTSerializer):
     class Meta:
         fields = ["access", "refresh", "user"]
 
-    @extend_schema_field(UserSerializer)
+    @extend_schema_field(MinimalUserSerializer)
     def get_user(self, obj):
         """
         Include full user data in JWT response
@@ -172,12 +172,12 @@ class CustomJWTSerializer(BaseJWTSerializer):
 
         if user:
             # Create a new context without the request to avoid AnonymousUser issues
-            return UserSerializer(user, context={"request": None}).data
+            return MinimalUserSerializer(user, context={"request": None}).data
 
         # Fallback: try to get from request context
         request = self.context.get("request")
         if request and hasattr(request, "user") and request.user.is_authenticated:
-            return UserSerializer(request.user, context={"request": None}).data
+            return MinimalUserSerializer(request.user, context={"request": None}).data
 
         return None
 

@@ -101,8 +101,9 @@ class MinimalUserSerializer(serializers.ModelSerializer):
 
     id = serializers.UUIDField(read_only=True)
     full_name = serializers.ReadOnlyField()
+    email_verified = serializers.ReadOnlyField(source="is_email_verified")
 
     class Meta:
         model = User
-        fields = ["id", "email", "full_name", "avatar"]
+        fields = ["id", "email", "full_name", "avatar", "email_verified"]
         read_only_fields = fields
