@@ -19,6 +19,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.serializers import UpdateUserSerializer, UserSerializer
+from common.responses import error, success
 
 from .schemas import (
     change_password_schema,
@@ -131,13 +132,10 @@ class DisconnectSocialAccountView(APIView):
 
         # Safety check: prevent locking user out
         if social_accounts.count() == 1 and not user.has_usable_password():
-            return Response(
-                {
-                    "error": "cannot_disconnect",
-                    "message": "Cannot disconnect the only login method. "
-                    "Please set a password first.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            return error(
+                message="Cannot disconnect the only login method. Please set a password first.",
+                errors={"provider": "Cannot disconnect the only login method"},
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
@@ -148,18 +146,15 @@ class DisconnectSocialAccountView(APIView):
                 f"User {user.email} (ID: {user.id}) disconnected {provider} account"
             )
 
-            return Response(
-                {"message": f"{provider.title()} account disconnected successfully"},
-                status=status.HTTP_200_OK,
+            return success(
+                message=f"{provider.title()} account disconnected successfully"
             )
 
         except SocialAccount.DoesNotExist:
-            return Response(
-                {
-                    "error": "not_found",
-                    "message": f"No {provider} account is connected",
-                },
-                status=status.HTTP_404_NOT_FOUND,
+            return error(
+                message=f"No {provider} account is connected",
+                errors={"provider": f"{provider} account not found"},
+                status_code=status.HTTP_404_NOT_FOUND,
             )
 
 
@@ -218,9 +213,10 @@ class ChangePasswordView(APIView):
 
         # Check old password
         if not user.check_password(serializer.validated_data["old_password"]):
-            return Response(
-                {"error": "invalid_password", "message": "Old password is incorrect"},
-                status=status.HTTP_400_BAD_REQUEST,
+            return error(
+                message="Old password is incorrect",
+                errors={"old_password": "The password you entered is incorrect"},
+                status_code=status.HTTP_400_BAD_REQUEST,
             )
 
         # Set new password
@@ -232,9 +228,7 @@ class ChangePasswordView(APIView):
 
         logger.info(f"Password changed for user: {user.email} (ID: {user.id})")
 
-        return Response(
-            {"message": "Password changed successfully"}, status=status.HTTP_200_OK
-        )
+        return success(message="Password changed successfully")
 
 
 @logout_schema
@@ -248,15 +242,24 @@ def logout_view(request):
     """
     try:
         refresh_token = request.data.get("refresh")
-        if refresh_token:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
+
+        if not refresh_token:
+            return error(
+                message="Refresh token is required",
+                errors={"refresh": "This field is required"},
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
+
+        token = RefreshToken(refresh_token)
+        token.blacklist()
 
         logger.info(f"User logged out: {request.user.email} (ID: {request.user.id})")
 
-        return Response(
-            {"message": "Successfully logged out"}, status=status.HTTP_200_OK
-        )
+        return success(message="Successfully logged out")
     except Exception as e:
         logger.error(f"Logout error: {str(e)}", exc_info=True)
-        return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return error(
+            message="Logout failed",
+            errors={"detail": str(e)},
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )
