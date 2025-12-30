@@ -29,7 +29,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
 class RegisterSerializer(serializers.ModelSerializer):
     """
     Serializer for user registration
-    
+
     Returns JWT tokens and user data upon successful registration
     """
 
@@ -38,12 +38,14 @@ class RegisterSerializer(serializers.ModelSerializer):
         required=True,
         validators=[validate_password],
         style={"input_type": "password"},
+        help_text="Must be at least 8 characters with letters and numbers",
     )
     password2 = serializers.CharField(
         write_only=True,
         required=True,
         style={"input_type": "password"},
         label="Confirm Password",
+        help_text="Must match password",
     )
 
     class Meta:
@@ -120,13 +122,19 @@ class RegisterSerializer(serializers.ModelSerializer):
 class LoginSerializer(serializers.Serializer):
     """
     Serializer for user login
-    
+
     Returns JWT tokens and user data upon successful authentication
     """
 
-    email = serializers.EmailField(required=True)
+    email = serializers.EmailField(
+        required=True,
+        help_text="Your registered email address",
+    )
     password = serializers.CharField(
-        required=True, write_only=True, style={"input_type": "password"}
+        required=True,
+        write_only=True,
+        style={"input_type": "password"},
+        help_text="Your account password",
     )
 
     def validate(self, attrs):
@@ -185,24 +193,29 @@ class CustomJWTSerializer(BaseJWTSerializer):
 class ChangePasswordSerializer(serializers.Serializer):
     """
     Serializer for password change
-    
+
     Requires old password verification before setting new password
     """
 
     old_password = serializers.CharField(
-        required=True, write_only=True, style={"input_type": "password"}
+        required=True,
+        write_only=True,
+        style={"input_type": "password"},
+        help_text="Your current password",
     )
     new_password = serializers.CharField(
         required=True,
         write_only=True,
         validators=[validate_password],
         style={"input_type": "password"},
+        help_text="Your new password (min 8 characters)",
     )
     new_password2 = serializers.CharField(
         required=True,
         write_only=True,
         style={"input_type": "password"},
         label="Confirm New Password",
+        help_text="Must match new password"
     )
 
     def validate(self, attrs):
@@ -217,11 +230,11 @@ class ChangePasswordSerializer(serializers.Serializer):
 class SocialLoginSerializer(serializers.Serializer):
     """
     Serializer for social OAuth login
-    
+
     Accepts access token from OAuth provider
     """
-    
+
     access_token = serializers.CharField(
         required=True,
-        help_text="OAuth access token from provider (Google, Facebook, GitHub)"
+        help_text="OAuth access token from provider (Google, Facebook, GitHub)",
     )
