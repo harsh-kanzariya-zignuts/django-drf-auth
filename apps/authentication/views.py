@@ -16,6 +16,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.serializers import UpdateUserSerializer, UserSerializer
@@ -256,6 +257,13 @@ def logout_view(request):
         logger.info(f"User logged out: {request.user.email} (ID: {request.user.id})")
 
         return success(message="Successfully logged out")
+    
+    except TokenError as e:
+        return error(
+            message="Invalid or expired refresh token",
+            errors={"detail": str(e)},
+            status_code=status.HTTP_401_UNAUTHORIZED,
+        )
     except Exception as e:
         logger.error(f"Logout error: {str(e)}", exc_info=True)
         return error(
