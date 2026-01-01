@@ -8,6 +8,11 @@ services:
     tmpfs:
       - /var/lib/postgresql/data  # In-memory for speed
 
+  redis:
+    image: redis:7-alpine
+    tmpfs:
+      - /data  # In-memory for speed
+
   test:
     build:
       context: .
@@ -20,8 +25,13 @@ services:
       POSTGRES_DB: testdb
       POSTGRES_USER: testuser
       POSTGRES_PASSWORD: testpass
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CELERY_TASK_ALWAYS_EAGER: "True"  # Run tasks synchronously in tests
     depends_on:
       db:
+        condition: service_started
+      redis:
         condition: service_started
     command: >
       sh -c "

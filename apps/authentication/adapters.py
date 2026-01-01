@@ -5,6 +5,11 @@ from allauth.account.adapter import DefaultAccountAdapter
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.conf import settings
 
+from apps.authentication.tasks import (
+    send_verification_email_task,
+    send_welcome_email_task,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,6 +143,34 @@ class CustomAccountAdapter(DefaultAccountAdapter):
     def is_open_for_signup(self, request):
         """Control whether regular signups are allowed"""
         return True
+
+    def send_confirmation_mail(self, request, emailconfirmation, signup):
+        """
+        Override to send verification email asynchronously via Celery
+        """
+        # Get the verification URL
+        verification_url = self.get_email_confirmation_url(request, emailconfirmation)
+        user = emailconfirmation.email_address.user
+
+        # Send email asynchronously via Celery
+        send_verification_email_task.delay(
+            user_email=emailconfirmation.email_address.email,
+            verification_url=verification_url,
+            user_name=user.full_name or user.email,
+        )
+
+    def confirm_email(self, request, email_address):
+        """
+        Called after email is verified - send welcome email
+        """
+        super().confirm_email(request, email_address)
+        user = email_address.user
+
+        # Send welcome email asynchronously
+        send_welcome_email_task.delay(
+            user_email=email_address.email,
+            user_name=user.full_name or user.email,
+        )
 
     def send_mail(self, template_prefix, email, context):
         """

@@ -32,3 +32,7 @@ PASSWORD_HASHERS = [
 
 # To remove Static Files Warning
 STATIC_ROOT = None
+
+# Celery - Run tasks synchronously in tests
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
