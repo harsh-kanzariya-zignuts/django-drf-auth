@@ -10,6 +10,7 @@ Complete guide for running the Django authentication system with Docker.
 - [Quick Start](#quick-start)
 - [File Structure](#file-structure)
 - [Configuration Files](#configuration-files)
+- [Environment Variables](#environment-variables)
 - [Development Workflow](#development-workflow)
 - [Testing](#testing)
 - [Production Deployment](#production-deployment)
@@ -22,15 +23,15 @@ Complete guide for running the Django authentication system with Docker.
 
 Before you begin, ensure you have:
 
-- **Docker** (20.10+): [Install Docker](https://docs.docker.com/get-docker/)
-- **Docker Compose** (2.0+): [Install Docker Compose](https://docs.docker.com/compose/install/)
+- **Docker** (24.0+): [Install Docker](https://docs.docker.com/get-docker/)
+- **Docker Compose** (2.0+): Included with Docker Desktop
 - **Git**: For cloning the repository
 
 Verify installations:
 
 ```bash
 docker --version
-docker-compose --version
+docker compose version
 ```
 
 ---
@@ -47,45 +48,53 @@ cd <project-directory>
 # Copy environment file
 cp .env.example .env
 
-# IMPORTANT: Edit .env and change these values:
-# - DJANGO_SECRET_KEY (generate a secure one)
-# - POSTGRES_PASSWORD (use a strong password)
-# - EMAIL settings (if using email features)
+# Edit .env — at minimum set these before starting:
+# DJANGO_SECRET_KEY=<generate a secure one>
+# POSTGRES_PASSWORD=<strong password>
+# REDIS_PASSWORD=<strong password>
+# CELERY_BROKER_URL=redis://:yourpassword@redis:6379/0   ← must match REDIS_PASSWORD
+# CELERY_RESULT_BACKEND=redis://:yourpassword@redis:6379/1
 ```
 
 ### 2. Build and Run
 
 ```bash
-# Build images
-docker-compose build
-
-# Start services (with hot reload for development)
-docker-compose up
+# Build images and start all services (development mode with hot reload)
+docker compose up --build
 
 # Or run in background
-docker-compose up -d
+docker compose up -d --build
 ```
 
 ### 3. Access the Application
 
-- **API**: http://localhost:8000
-- **Admin Panel**: http://localhost:8000/admin/
-- **API Docs** (after Swagger setup): http://localhost:8000/api/docs/
+| Service | URL |
+|---|---|
+| API | http://localhost:8000 |
+| Admin Panel | http://localhost:8000/admin/ |
+| Health Check | http://localhost:8000/health/ |
+| API Docs (Swagger) | http://localhost:8000/api/docs/ |
+| PostgreSQL (host) | localhost:5440 |
+| Redis (host) | localhost:6379 |
+
+> PostgreSQL and Redis are exposed to your host machine in development so you can
+> connect with tools like pgAdmin, TablePlus, or the VS Code Redis extension.
+> Both are bound to `127.0.0.1` only — not accessible from your network.
 
 ### 4. Create Superuser
 
 ```bash
-docker-compose exec web python manage.py createsuperuser --email admin@example.com
+docker compose exec web python manage.py createsuperuser --email admin@example.com
 ```
 
 ### 5. Stop Services
 
 ```bash
-# Stop containers
-docker-compose down
+# Stop containers (keeps volumes/data)
+docker compose down
 
-# Stop and remove volumes (⚠️ deletes database)
-docker-compose down -v
+# Stop and remove volumes (⚠️ deletes database and Redis data)
+docker compose down -v
 ```
 
 ---
@@ -94,83 +103,197 @@ docker-compose down -v
 
 ```
 project/
-├── Dockerfile                      # Production-grade multi-stage build
+├── Dockerfile                      # Multi-stage build (builder + runtime)
 ├── docker-compose.yml              # Base configuration (production-like)
 ├── docker-compose.override.yml     # Development overrides (auto-applied)
-├── docker-compose.test.yml         # Testing configuration
-├── .dockerignore                   # Files to exclude from Docker build
-├── .env                           # Environment variables (create from .env.example)
-├── .env.example                    # Environment template
+├── docker-compose.test.yml         # Standalone test runner
+├── .dockerignore                   # Files excluded from Docker build context
+├── .env                            # Your local environment variables (never commit)
+├── .env.example                    # Template — copy this to .env
 └── requirements/
-    ├── base.txt                   # Core dependencies
-    └── development.txt            # Dev dependencies
+    ├── base.txt                    # Core dependencies
+    └── development.txt             # Dev + test dependencies
 ```
 
 ---
 
 ## ⚙️ Configuration Files
 
-### 1. **Dockerfile** (Multi-Stage Build)
+### 1. `Dockerfile` (Multi-Stage Build)
 
-**Purpose**: Creates optimized, production-ready Docker image
+Two stages to keep the final image lean:
 
-**Key Features**:
+- **Builder stage**: installs build tools and Python packages (~800MB, temporary)
+- **Runtime stage**: copies only what's needed to run (~250MB, deployed)
 
-- ✅ Multi-stage build (smaller images)
-- ✅ Non-root user (security)
-- ✅ Health checks (K8s/ECS ready)
-- ✅ Optimized layer caching
+Key features:
+- ✅ Non-root user (`django`) for security
+- ✅ `curl` installed for healthchecks
+- ✅ `libpq5` for PostgreSQL client
+- ✅ `PYTHONDONTWRITEBYTECODE` and `PYTHONUNBUFFERED` set correctly
 
-**Size Optimization**:
+### 2. `docker-compose.yml` (Base Configuration)
 
-- Builder stage: ~800MB (temporary)
-- Final image: ~250MB (deployed)
+Production-like setup. Defines all services with security and reliability in mind.
 
-### 2. **docker-compose.yml** (Base Configuration)
+**Services:**
 
-**Purpose**: Production-like setup using Gunicorn
+| Service | Image | Purpose |
+|---|---|---|
+| `db` | postgres:16-alpine | PostgreSQL database |
+| `redis` | redis:7-alpine | Cache + Celery broker |
+| `web` | local build | Django + Gunicorn |
+| `celery` | local build | Background task worker |
+| `celery-beat` | local build | Periodic task scheduler |
 
-**Services**:
+**Key features:**
+- ✅ Redis password auth (`--requirepass`)
+- ✅ Redis not exposed to host (internal network only in base file)
+- ✅ All services have `restart: unless-stopped`
+- ✅ Health checks on all services with proper `start_period`
+- ✅ YAML anchors eliminate repeated config blocks
+- ✅ Log rotation (10MB max, 3 files) on all services
+- ✅ Resource limits (memory + CPU) on app services
+- ✅ Celery Beat pidfile prevents duplicate schedulers
 
-- `db`: PostgreSQL 16 (Alpine Linux)
-- `web`: Django app with Gunicorn
+### 3. `docker-compose.override.yml` (Development Mode)
 
-**Usage**:
+Auto-merged by Docker Compose when you run `docker compose up`. Only contains
+what's different from production — not a full duplicate of the base file.
 
+**What it changes:**
+- Runs Django dev server instead of Gunicorn (hot reload)
+- Bind-mounts source code (`.:/app`) for live editing without rebuilding
+- Sets `DJANGO_DEBUG=True`
+- Exposes PostgreSQL on `127.0.0.1:5440` for pgAdmin / TablePlus / DataGrip
+- Exposes Redis on `127.0.0.1:6379` for the VS Code Redis extension
+
+**To run without override** (test production Gunicorn behaviour):
 ```bash
-# Use with production settings
-docker-compose -f docker-compose.yml up
+docker compose -f docker-compose.yml up
 ```
 
-### 3. **docker-compose.override.yml** (Development Mode)
+### 4. `docker-compose.test.yml` (Test Runner)
 
-**Purpose**: Adds development convenience features
+Fully standalone — do **not** merge with the base file (see [Testing](#testing) for why).
 
-**Features**:
+**What makes it different:**
+- In-memory tmpfs for PostgreSQL and Redis (fast, no disk I/O)
+- Hardcoded test credentials (isolated, no real secrets needed)
+- No Redis password (not needed in isolated test network)
+- All required env vars declared explicitly (no `.env` file dependency)
+- `restart: "no"` so failures exit cleanly for CI
 
-- ✅ Live code reload (volume mounting)
-- ✅ Django runserver (auto-reload)
-- ✅ Debug mode enabled
-- ✅ Interactive shell support
+---
 
-**Auto-applied** when you run `docker-compose up`
+## 🔧 Environment Variables
 
-**To ignore** (test production behavior):
+### How settings work
 
-```bash
-docker-compose -f docker-compose.yml up
+This project uses a custom settings switcher in `config/settings/__init__.py`:
+
+```python
+env = os.getenv("DJANGO_ENV", "development")
+module = import_module(f".{env}", "config.settings")
 ```
 
-### 4. **docker-compose.test.yml** (Testing)
+`DJANGO_SETTINGS_MODULE` is **always** `config.settings` — it never changes between environments.
+`DJANGO_ENV` is what controls which settings file actually loads:
 
-**Purpose**: Isolated test environment
+| `DJANGO_ENV` | Settings file loaded |
+|---|---|
+| `development` (default if unset) | `config/settings/development.py` |
+| `production` | `config/settings/production.py` |
+| `testing` | `config/settings/testing.py` |
 
-**Features**:
+### Complete `.env` reference
 
-- ✅ In-memory database (fast)
-- ✅ Separate network
-- ✅ Coverage reports
-- ✅ CI/CD compatible
+```bash
+# ── Environment ──────────────────────────────────────────────────────────────
+DJANGO_ENV=development             # Controls which settings file loads
+DJANGO_SECRET_KEY=                 # Required. Generate with:
+                                   # python -c "import secrets; print(secrets.token_urlsafe(50))"
+DJANGO_DEBUG=True                  # Set False in production
+DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1
+DJANGO_LOG_LEVEL=INFO
+
+# ── Database ─────────────────────────────────────────────────────────────────
+POSTGRES_DB=authdb
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=                 # Required. Use a strong password.
+POSTGRES_HOST=db                   # Always "db" when running in Docker
+POSTGRES_PORT=5432
+
+# Local development without Docker (comment out the Docker block above):
+# POSTGRES_HOST=localhost
+# POSTGRES_PORT=5433              # Use a different port if 5432 is taken locally
+
+# ── Redis ────────────────────────────────────────────────────────────────────
+REDIS_PASSWORD=                    # Required. Used by Redis --requirepass and broker URLs.
+
+# ⚠️  IMPORTANT: broker URLs must include the password to match Redis auth.
+#     In Docker:     redis://:yourpassword@redis:6379/0
+#     Without Docker (local): redis://localhost:6379/0  (if no local Redis password)
+CELERY_BROKER_URL=redis://:yourpassword@redis:6379/0
+CELERY_RESULT_BACKEND=redis://:yourpassword@redis:6379/1
+
+# ── Gunicorn / Celery tuning (optional) ──────────────────────────────────────
+GUNICORN_WORKERS=3
+GUNICORN_TIMEOUT=120
+CELERY_CONCURRENCY=4
+
+# ── Frontend ─────────────────────────────────────────────────────────────────
+FRONTEND_URL=http://localhost:3000
+SOCIALACCOUNT_CALLBACK_URL=http://localhost:3000/auth/callback
+
+# ── Email ────────────────────────────────────────────────────────────────────
+EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=your-email@gmail.com
+EMAIL_HOST_PASSWORD=your-app-specific-password
+DEFAULT_FROM_EMAIL=noreply@example.com
+
+# ── Authentication ───────────────────────────────────────────────────────────
+ACCOUNT_EMAIL_VERIFICATION=optional   # Use "mandatory" in production
+
+# ── CORS ─────────────────────────────────────────────────────────────────────
+CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+
+# ── Security (set True in production) ────────────────────────────────────────
+SECURE_SSL_REDIRECT=False
+SESSION_COOKIE_SECURE=False
+CSRF_COOKIE_SECURE=False
+SECURE_HSTS_SECONDS=0
+
+# ── Social OAuth (leave blank if not using) ───────────────────────────────────
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+FACEBOOK_APP_ID=
+FACEBOOK_APP_SECRET=
+GITHUB_CLIENT_ID=
+GITHUB_CLIENT_SECRET=
+
+# ── Monitoring (optional) ────────────────────────────────────────────────────
+SENTRY_DSN=
+```
+
+### ⚠️ Common `.env` mistake — Redis password mismatch
+
+Your Redis container starts with `--requirepass ${REDIS_PASSWORD}`, so your
+broker URLs **must** include the password:
+
+```bash
+# ❌ Wrong — connection will be refused (NOAUTH error)
+REDIS_PASSWORD=abc123
+CELERY_BROKER_URL=redis://redis:6379/0
+
+# ✅ Correct — password included in URL
+REDIS_PASSWORD=abc123
+CELERY_BROKER_URL=redis://:abc123@redis:6379/0
+CELERY_RESULT_BACKEND=redis://:abc123@redis:6379/1
+```
 
 ---
 
@@ -180,77 +303,79 @@ docker-compose -f docker-compose.yml up
 
 ```bash
 # Start with hot reload (override applied automatically)
-docker-compose up
+docker compose up
 
-# Or in background
-docker-compose up -d
+# Background mode
+docker compose up -d
 
 # View logs
-docker-compose logs -f web
+docker compose logs -f web
+docker compose logs -f celery
 ```
 
 ### Running Management Commands
 
 ```bash
-# Create migrations
-docker-compose exec web python manage.py makemigrations
-
-# Apply migrations
-docker-compose exec web python manage.py migrate
+# Migrations
+docker compose exec web python manage.py makemigrations
+docker compose exec web python manage.py migrate
 
 # Create superuser
-docker-compose exec web python manage.py createsuperuser --email admin@example.com
+docker compose exec web python manage.py createsuperuser --email admin@example.com
 
 # Django shell
-docker-compose exec web python manage.py shell
+docker compose exec web python manage.py shell
 
-# Collect static files
-docker-compose exec web python manage.py collectstatic --noinput
+# Check for configuration issues
+docker compose exec web python manage.py check
 ```
 
 ### Database Management
 
 ```bash
-# Access PostgreSQL shell
-docker-compose exec db psql -U authuser -d authdb
+# Access PostgreSQL shell (via Docker)
+docker compose exec db psql -U postgres -d authdb
 
-# Backup database
-docker-compose exec db pg_dump -U authuser authdb > backup.sql
+# Or connect with any DB tool using:
+# Host: localhost  Port: 5440  DB: authdb  User: postgres
 
-# Restore database
-docker-compose exec -T db psql -U authuser authdb < backup.sql
+# Backup
+docker compose exec db pg_dump -U postgres authdb > backup.sql
+
+# Restore
+docker compose exec -T db psql -U postgres authdb < backup.sql
 
 # Reset database (⚠️ deletes all data)
-docker-compose down -v
-docker-compose up -d
-docker-compose exec web python manage.py migrate
+docker compose down -v
+docker compose up -d
 ```
 
-### Code Changes
+### Connecting to Redis
 
-With `docker-compose.override.yml`:
-
-- ✅ Code changes auto-reload
-- ✅ No rebuild needed
-- ✅ Immediate feedback
-
-### Rebuilding
-
-When to rebuild:
-
-- ❗ Changed `requirements/*.txt`
-- ❗ Modified `Dockerfile`
-- ❗ Added system dependencies
+In development, Redis is exposed on `localhost:6379`:
 
 ```bash
-# Rebuild specific service
-docker-compose build web
+# VS Code Redis extension: redis://localhost:6379 (no password prompt needed from host)
+# Redis CLI:
+redis-cli -p 6379
+# or with password:
+redis-cli -p 6379 -a yourpassword
+```
 
-# Rebuild all services
-docker-compose build
+### When to Rebuild
 
-# Force rebuild (no cache)
-docker-compose build --no-cache
+Code changes in `.py` files don't require a rebuild — the bind mount
+(`.:/app`) makes them live immediately. Rebuild only when:
+
+```bash
+# After changing requirements/*.txt or Dockerfile
+docker compose build
+
+# Specific service only
+docker compose build web
+
+# Force full rebuild (no cache)
+docker compose build --no-cache
 ```
 
 ---
@@ -260,50 +385,60 @@ docker-compose build --no-cache
 ### Run All Tests
 
 ```bash
-# Using dedicated test compose file
-docker-compose -f docker-compose.test.yml up --abort-on-container-exit
-
-# Or run tests in main web container
-docker-compose exec web pytest -v
+# Always use the standalone command
+docker compose -f docker-compose.test.yml up --abort-on-container-exit
 ```
 
-### Run Specific Tests
+**Why standalone and not merged with `docker-compose.yml`?**
+The base file mounts named volumes (`postgres_data`, `redis_data`) at the same
+paths the test file uses for tmpfs. Docker Compose cannot clear inherited volumes
+during a file merge, which causes this error:
+
+```
+services.db.volumes[0]: target /var/lib/postgresql/data already mounted as services.db.tmpfs[0]
+```
+
+The test file is fully self-contained (different credentials, tmpfs, no Redis auth)
+so standalone is both correct and simpler.
+
+### CI Pipeline Command
 
 ```bash
-# Test specific app
-docker-compose exec web pytest apps/authentication/tests/ -v
+# Builds fresh image, runs tests, exits with pytest's exit code
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test
+```
 
-# Test specific file
-docker-compose exec web pytest apps/authentication/tests/test_authentication.py -v
+> `--exit-code-from test` is essential for CI — without it `docker compose up`
+> always exits 0 even when pytest fails, making your pipeline show green on failures.
 
-# Test specific function
-docker-compose exec web pytest apps/authentication/tests/test_authentication.py::TestAuthentication::test_user_login -v
+### Run Specific Tests (in running dev container)
 
-# Run with keyword filter
-docker-compose exec web pytest -k "login" -v
+```bash
+# All tests
+docker compose exec web pytest -v
+
+# Specific app
+docker compose exec web pytest apps/authentication/tests/ -v
+
+# Specific file
+docker compose exec web pytest apps/authentication/tests/test_authentication.py -v
+
+# Specific test
+docker compose exec web pytest apps/authentication/tests/test_authentication.py::TestAuthentication::test_user_login -v
+
+# Filter by keyword
+docker compose exec web pytest -k "login" -v
 ```
 
 ### Coverage Reports
 
 ```bash
-# Generate coverage report
-docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+# Run via test compose (generates htmlcov/ in project root)
+docker compose -f docker-compose.test.yml up --abort-on-container-exit
 
-# Coverage files will be in:
-# - htmlcov/index.html (open in browser)
-# - coverage.xml (for CI/CD)
-# - .coverage (raw data)
-
-# Or run coverage manually
-docker-compose exec web pytest --cov=apps --cov-report=html --cov-report=term-missing
-```
-
-### CI/CD Testing
-
-```bash
-# Exact command for CI pipelines
-docker-compose -f docker-compose.test.yml build
-docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test
+# Open coverage report
+open htmlcov/index.html        # macOS
+xdg-open htmlcov/index.html    # Linux
 ```
 
 ---
@@ -312,375 +447,290 @@ docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-co
 
 ### 1. Environment Setup
 
-```bash
-# Create production .env
-cp .env.example .env.production
+Create `.env.production` (never commit this file):
 
-# Edit .env.production:
+```bash
 DJANGO_ENV=production
+DJANGO_SECRET_KEY=<generate: python -c "import secrets; print(secrets.token_urlsafe(50))">
 DJANGO_DEBUG=False
-DJANGO_SECRET_KEY=<generate-strong-secret-key>
-POSTGRES_PASSWORD=<strong-production-password>
-ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
+DJANGO_ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
+
+POSTGRES_DB=authdb
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=<very-strong-password>
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+
+REDIS_PASSWORD=<very-strong-password>
+CELERY_BROKER_URL=redis://:yourpassword@redis:6379/0
+CELERY_RESULT_BACKEND=redis://:yourpassword@redis:6379/1
+
+CORS_ALLOWED_ORIGINS=https://yourdomain.com
+ACCOUNT_EMAIL_VERIFICATION=mandatory
+
 SECURE_SSL_REDIRECT=True
 SESSION_COOKIE_SECURE=True
 CSRF_COOKIE_SECURE=True
+SECURE_HSTS_SECONDS=31536000
+
+GUNICORN_WORKERS=4
+CELERY_CONCURRENCY=4
 ```
 
-### 2. Production Compose File
-
-Create `docker-compose.production.yml`:
-
-```yaml
-version: "3.9"
-
-services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: always
-
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    command: >
-      sh -c "
-      python manage.py migrate --noinput &&
-      python manage.py collectstatic --noinput &&
-      gunicorn config.wsgi:application
-      --bind 0.0.0.0:8000
-      --workers 4
-      --threads 2
-      --worker-class gthread
-      --timeout 120
-      --access-logfile -
-      --error-logfile -
-      --log-level info
-      "
-    env_file:
-      - .env.production
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.production
-    ports:
-      - "8000:8000"
-    depends_on:
-      - db
-    restart: always
-
-volumes:
-  postgres_data:
-```
-
-### 3. Deploy
+### 2. Deploy
 
 ```bash
-# Build production image
-docker-compose -f docker-compose.production.yml build
+# Use base file only — no override file in production
+docker compose -f docker-compose.yml --env-file .env.production up -d --build
 
-# Start production services
-docker-compose -f docker-compose.production.yml up -d
-
-# Check logs
-docker-compose -f docker-compose.production.yml logs -f
+# Monitor startup
+docker compose -f docker-compose.yml logs -f
 
 # Create superuser
-docker-compose -f docker-compose.production.yml exec web python manage.py createsuperuser
+docker compose -f docker-compose.yml exec web python manage.py createsuperuser
 ```
 
-### 4. Production Best Practices
+### 3. Production Checklist
 
-- ✅ Use environment variables for secrets
-- ✅ Enable SSL/TLS (use nginx/traefik as reverse proxy)
-- ✅ Set up monitoring (Sentry, Prometheus)
-- ✅ Configure log aggregation
-- ✅ Regular database backups
-- ✅ Use Docker secrets for sensitive data
-- ✅ Implement rate limiting
-- ✅ Set up health checks
+- [ ] `DJANGO_SECRET_KEY` is long, random, and unique per environment
+- [ ] `DJANGO_DEBUG=False`
+- [ ] `POSTGRES_PASSWORD` is strong
+- [ ] `REDIS_PASSWORD` is strong and matches `CELERY_BROKER_URL`
+- [ ] `ALLOWED_HOSTS` lists only your actual domains
+- [ ] `ACCOUNT_EMAIL_VERIFICATION=mandatory`
+- [ ] SSL/TLS configured (nginx or Traefik as reverse proxy)
+- [ ] All `SECURE_*` and `*_COOKIE_SECURE` flags set to `True`
+- [ ] Database backups scheduled
+- [ ] `.env.production` not in version control
 
 ---
 
 ## 🔧 Troubleshooting
 
-### Common Issues
-
-#### 1. Port Already in Use
+### Health Check First
 
 ```bash
-# Error: port 8000 is already allocated
+curl http://localhost:8000/health/
+# Expected: {"status": "ok", "checks": {"database": "ok", "cache": "ok"}}
 
-# Solution: Change port in docker-compose.yml
-ports:
-  - "8001:8000"  # Use 8001 on host
+# If degraded, it tells you which service is down:
+# {"status": "degraded", "checks": {"database": "unavailable", "cache": "ok"}}
+```
 
-# Or stop conflicting service
+### Common Issues
+
+#### Port already in use
+
+```bash
+# Kill process using port 8000
 lsof -ti:8000 | xargs kill -9
 ```
 
-#### 2. Database Connection Error
+#### Redis authentication error (NOAUTH)
 
 ```bash
-# Error: could not connect to server
+# Symptom: Celery can't connect, logs show "NOAUTH Authentication required"
+# Cause: CELERY_BROKER_URL doesn't include REDIS_PASSWORD
 
-# Solution 1: Wait for database to be ready
-docker-compose up -d db
-# Wait 10 seconds
-docker-compose up web
+# Check your .env — broker URL must include the password:
+# redis://:yourpassword@redis:6379/0
+#        ^^ note colon before password, no username
 
-# Solution 2: Check database health
-docker-compose ps
-docker-compose logs db
-
-# Solution 3: Reset database
-docker-compose down -v
-docker-compose up -d
+# Verify Redis itself is working:
+docker compose exec redis redis-cli -a yourpassword ping
+# Expected: PONG
 ```
 
-#### 3. Permission Denied
+#### Database connection error
 
 ```bash
-# Error: Permission denied (staticfiles/media)
-
-# Solution: Fix ownership
-docker-compose exec web chown -R django:django /app/staticfiles /app/media
-
-# Or rebuild with proper user
-docker-compose build --no-cache
+docker compose ps           # check all services are healthy
+docker compose logs db      # look for init errors
+docker compose restart db
 ```
 
-#### 4. Module Not Found
+#### Module not found after adding a dependency
 
 ```bash
-# Error: ModuleNotFoundError
-
-# Solution: Rebuild after dependency changes
-docker-compose build web
-docker-compose up -d web
+# Always rebuild after changing requirements files
+docker compose build web
+docker compose up -d web
 ```
 
-#### 5. Container Exits Immediately
+#### Container exits immediately
 
 ```bash
-# Check logs
-docker-compose logs web
-
-# Common causes:
-# - Syntax error in code
-# - Missing migration
-# - Environment variable issue
+docker compose logs web     # read the actual error
 
 # Debug interactively
-docker-compose run --rm web bash
+docker compose run --rm web bash
 python manage.py check
+```
+
+#### Test volume conflict
+
+```bash
+# Error: target /data already mounted as services.redis.tmpfs[0]
+# Cause: running test file merged with base file
+
+# Fix: always run tests standalone
+docker compose -f docker-compose.test.yml up --abort-on-container-exit
 ```
 
 ### Useful Debug Commands
 
 ```bash
-# Check container status
-docker-compose ps
+# All container statuses and health
+docker compose ps
 
-# View logs
-docker-compose logs web
-docker-compose logs db
-docker-compose logs -f --tail=100 web
+# Follow all logs
+docker compose logs -f
 
-# Access container shell
-docker-compose exec web bash
+# Follow specific service, last 100 lines
+docker compose logs -f --tail=100 web
 
-# Check environment variables
-docker-compose exec web env
+# Shell into running container
+docker compose exec web bash
 
-# Inspect container
-docker inspect auth_web
+# Check what env vars are actually set inside container
+docker compose exec web env | sort
 
-# Check networks
-docker network ls
-docker network inspect <network-name>
+# Real-time CPU/memory usage
+docker stats
 
-# Remove everything and start fresh
-docker-compose down -v --rmi all
-docker-compose build --no-cache
-docker-compose up
+# Full cleanup — removes containers, volumes, images
+docker compose down -v --rmi all
+docker compose build --no-cache
+docker compose up
 ```
 
 ---
 
 ## 🎓 Advanced Usage
 
-### Custom Commands
-
-Create `docker-compose.override.local.yml` for personal overrides:
-
-```yaml
-version: "3.9"
-
-services:
-  web:
-    environment:
-      - DEBUG_TOOLBAR=True
-    ports:
-      - "8001:8000"
-```
-
-Use it:
-
-```bash
-docker-compose -f docker-compose.yml -f docker-compose.override.local.yml up
-```
-
 ### Multi-Environment Setup
 
 ```bash
-# Development
-docker-compose up
+# Development (default — override auto-applied)
+docker compose up
 
-# Staging
-docker-compose -f docker-compose.yml -f docker-compose.staging.yml up
+# Production-like without override
+docker compose -f docker-compose.yml up
 
-# Production
-docker-compose -f docker-compose.production.yml up
+# Tests
+docker compose -f docker-compose.test.yml up --abort-on-container-exit
 ```
 
-### Scaling Services
+### Personal Local Overrides
+
+Create `docker-compose.local.yml` for your own machine-specific config (add to `.gitignore`):
+
+```yaml
+services:
+  web:
+    ports:
+      - "8001:8000"   # use different port if 8000 is taken
+    environment:
+      DJANGO_LOG_LEVEL: DEBUG
+```
+
+Use it:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.override.yml -f docker-compose.local.yml up
+```
+
+### Scaling Celery Workers
 
 ```bash
-# Scale web workers (requires load balancer)
-docker-compose up -d --scale web=3
+# Run 3 celery worker containers
+docker compose up -d --scale celery=3
 ```
 
 ### Using with Docker Swarm
 
 ```bash
-# Initialize swarm
 docker swarm init
-
-# Deploy stack
-docker stack deploy -c docker-compose.production.yml auth_stack
-
-# Check status
+docker stack deploy -c docker-compose.yml auth_stack
 docker stack services auth_stack
-
-# Remove stack
 docker stack rm auth_stack
-```
-
-### Health Check Commands
-
-```bash
-# Manual health check
-docker-compose exec web curl http://localhost:8000/admin/
-
-# Check all container health
-docker-compose ps
-
-# Watch health status
-watch docker-compose ps
 ```
 
 ### Resource Limits
 
-Add to `docker-compose.yml`:
+Already configured in `docker-compose.yml`:
 
-```yaml
-services:
-  web:
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 2G
-        reservations:
-          cpus: "0.5"
-          memory: 512M
-```
+| Service | Memory | CPU |
+|---|---|---|
+| web | 512MB | 1.0 core |
+| celery | 512MB | 1.0 core |
+| celery-beat | 256MB | 0.5 core |
+
+Tune via `GUNICORN_WORKERS` and `CELERY_CONCURRENCY` in `.env`.
 
 ---
 
 ## 📊 Monitoring
 
-### View Container Stats
-
 ```bash
-# Real-time stats
+# Real-time stats for all containers
 docker stats
 
 # Specific container
 docker stats auth_web
 
-# Export metrics
+# Export as table
 docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"
-```
-
-### Logs Management
-
-```bash
-# Follow logs
-docker-compose logs -f
-
-# Last N lines
-docker-compose logs --tail=50 web
-
-# Since timestamp
-docker-compose logs --since 2024-01-01T00:00:00 web
 
 # Save logs to file
-docker-compose logs > app.log
+docker compose logs > app.log
 ```
+
+Log files rotate automatically — 10MB per file, 3 files kept per service.
 
 ---
 
 ## 🔐 Security Checklist
 
-- [ ] Changed `DJANGO_SECRET_KEY` in production
-- [ ] Used strong `POSTGRES_PASSWORD`
-- [ ] Enabled SSL/TLS in production
-- [ ] Set `DJANGO_DEBUG=False` in production
-- [ ] Restricted `ALLOWED_HOSTS`
-- [ ] Enabled security headers (HSTS, CSP)
-- [ ] Running as non-root user
-- [ ] Regular security updates
-- [ ] Database backups configured
-- [ ] Secrets not in version control
+- [ ] `DJANGO_SECRET_KEY` is unique and not committed to git
+- [ ] `POSTGRES_PASSWORD` is strong
+- [ ] `REDIS_PASSWORD` is strong and matches `CELERY_BROKER_URL`
+- [ ] Redis port not exposed in production (only in `docker-compose.override.yml`)
+- [ ] PostgreSQL port not exposed in production (only in `docker-compose.override.yml`)
+- [ ] `DJANGO_DEBUG=False` in production
+- [ ] `ALLOWED_HOSTS` restricted to your domains
+- [ ] `ACCOUNT_EMAIL_VERIFICATION=mandatory` in production
+- [ ] SSL/TLS enabled (nginx/Traefik in front)
+- [ ] All `SECURE_*` flags `True` in production
+- [ ] Running as non-root user (`django`) inside containers
+- [ ] `.env` and `.env.production` in `.gitignore`
 
 ---
 
 ## 🎯 Quick Reference
 
-### Essential Commands
-
 ```bash
-# Development
-docker-compose up -d                    # Start dev environment
-docker-compose logs -f web              # View logs
-docker-compose exec web bash            # Access shell
-docker-compose down                     # Stop services
+# ── Development ─────────────────────────────────────────────────────────────
+docker compose up -d                            # start dev environment
+docker compose logs -f web                      # follow web logs
+docker compose exec web bash                    # shell into web container
+docker compose exec web python manage.py shell  # Django shell
+docker compose down                             # stop services
 
-# Testing
-docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+# ── Testing ──────────────────────────────────────────────────────────────────
+docker compose -f docker-compose.test.yml up --abort-on-container-exit
 
-# Production
-docker-compose -f docker-compose.production.yml up -d
+# ── Building ─────────────────────────────────────────────────────────────────
+docker compose build                            # rebuild all images
+docker compose up -d --force-recreate           # recreate without rebuild
 
-# Rebuild
-docker-compose build                    # Rebuild images
-docker-compose up -d --force-recreate   # Recreate containers
-
-# Clean up
-docker-compose down -v                  # Remove volumes
-docker system prune -a                  # Clean everything
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+docker compose down -v                          # stop + remove volumes
+docker system prune -a                          # clean ALL unused Docker resources
 ```
 
-### Keyboard Shortcuts (in logs)
+### Keyboard Shortcuts (in `docker compose logs -f`)
 
-- `Ctrl+C`: Stop viewing logs (containers keep running)
-- `Ctrl+C` (twice): Stop containers
+- `Ctrl+C` — stop tailing logs (containers keep running)
 
 ---
 
@@ -689,22 +739,12 @@ docker system prune -a                  # Clean everything
 - [Django Documentation](https://docs.djangoproject.com/)
 - [Docker Documentation](https://docs.docker.com/)
 - [Docker Compose Documentation](https://docs.docker.com/compose/)
-- [PostgreSQL Documentation](https://www.postgresql.org/docs/)
 - [Gunicorn Documentation](https://docs.gunicorn.org/)
+- [Celery Documentation](https://docs.celeryq.dev/)
+- [django-environ Documentation](https://django-environ.readthedocs.io/)
 
 ---
 
-## 🆘 Need Help?
+**Last Updated**: May 2026
 
-If you encounter issues:
-
-1. Check the [Troubleshooting](#troubleshooting) section
-2. View container logs: `docker-compose logs -f web`
-3. Check GitHub Issues
-4. Contact the development team
-
----
-
-**Last Updated**: December 2025  
-**Docker Version**: 24.0+  
-**Docker Compose Version**: 2.0+
+**Docker**: 24.0+ | **Docker Compose**: 2.0+ | **Python**: 3.12 | **Django**: 5.x

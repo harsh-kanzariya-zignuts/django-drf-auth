@@ -48,7 +48,7 @@
                     font-weight: 600;
                   "
                 >
-                  {{ site.name }}
+                  {{ site_name }}
                 </h1>
               </td>
             </tr>
@@ -75,7 +75,7 @@
                     color: #374151;
                   "
                 >
-                  Hi {{ user.get_username }},
+                  Hi {{ user_name }},
                 </p>
 
                 <p
@@ -95,7 +95,7 @@
                   <tr>
                     <td align="center">
                       <a
-                        href="{{ activate_url }}"
+                        href="{{ verification_url }}"
                         style="
                           display: inline-block;
                           padding: 14px 28px;
@@ -133,7 +133,7 @@
                     color: #2563eb;
                   "
                 >
-                  {{ activate_url }}
+                  {{ verification_url }}
                 </p>
               </td>
             </tr>
@@ -153,7 +153,7 @@
                   If you didn’t create this account, you can safely ignore this
                   email.
                 </p>
-                <p style="margin: 0">© {{ site.name }} · All rights reserved</p>
+                <p style="margin: 0">© {{ site_name }} · All rights reserved</p>
               </td>
             </tr>
           </table>

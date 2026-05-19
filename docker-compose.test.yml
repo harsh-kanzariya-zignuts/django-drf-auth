@@ -1,3 +1,18 @@
+# ============================================================
+# docker-compose.test.yml — CI / test runner
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up --abort-on-container-exit
+#
+# For CI (propagates pytest exit code):
+#   docker compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test
+#
+# Why NOT merged with docker-compose.yml:
+#   The base file mounts named volumes at the same paths this file uses for
+#   tmpfs. Docker Compose cannot clear inherited volumes during merge, causing
+#   a mount conflict. This file is fully self-contained — standalone is correct.
+# ============================================================
+
 services:
   db:
     image: postgres:16-alpine
@@ -6,35 +21,62 @@ services:
       POSTGRES_USER: testuser
       POSTGRES_PASSWORD: testpass
     tmpfs:
-      - /var/lib/postgresql/data  # In-memory for speed
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: "no"
 
   redis:
     image: redis:7-alpine
+    command: redis-server --loglevel warning
     tmpfs:
-      - /data  # In-memory for speed
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+    restart: "no"
 
   test:
     build:
       context: .
       dockerfile: Dockerfile
-    env_file:
-      - .env
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings.testing
+      # Settings routing
+      DJANGO_SETTINGS_MODULE: config.settings
+      DJANGO_ENV: testing
+
+      # Secret key — safe dummy value for tests only, never used in production
+      DJANGO_SECRET_KEY: "test-only-secret-key-not-used-in-production-xj2k9p"
+      DJANGO_DEBUG: "False"
+
+      # Database — points to the test db container above
       POSTGRES_HOST: db
       POSTGRES_DB: testdb
       POSTGRES_USER: testuser
       POSTGRES_PASSWORD: testpass
+      POSTGRES_PORT: "5432"
+
+      # Redis — no auth in isolated test network
+      REDIS_PASSWORD: ""
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
-      CELERY_TASK_ALWAYS_EAGER: "True"  # Run tasks synchronously in tests
+      # CELERY_TASK_ALWAYS_EAGER = True is set in config/settings/testing.py
+
     depends_on:
       db:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     command: >
       sh -c "
-      python manage.py migrate --noinput &&
-      pytest -v --cov=apps --cov-report=term-missing --cov-report=html
+        python manage.py migrate --noinput &&
+        pytest -v --cov=apps --cov-report=term-missing --cov-report=html
       "
+    restart: "no"

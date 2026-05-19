@@ -1,4 +1,33 @@
+# ============================================================
+# docker-compose.yml — production base configuration
+# ============================================================
+
+x-app-build: &app-build
+  context: .
+  dockerfile: Dockerfile
+
+x-app-env: &app-env
+  DJANGO_SETTINGS_MODULE: config.settings
+  POSTGRES_HOST: db
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/1
+
+x-app-depends: &app-depends
+  db:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
+  # ----------------------------------------------------------
+  # PostgreSQL
+  # ----------------------------------------------------------
   db:
     image: postgres:16-alpine
     container_name: auth_db
@@ -13,28 +42,41 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - backend
-
-  redis:
-    image: redis:7-alpine
-    container_name: auth_redis
-    command: redis-server --save 60 1 --loglevel warning
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      start_period: 10s
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
 
+  # ----------------------------------------------------------
+  # Redis
+  # ----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: auth_redis
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - backend
+    restart: unless-stopped
+    logging: *default-logging
+
+  # ----------------------------------------------------------
+  # Django / Gunicorn
+  # ----------------------------------------------------------
   web:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *app-build
     container_name: auth_web
     command: >
       sh -c "
@@ -43,29 +85,22 @@ services:
         echo 'Collecting static files...' &&
         python manage.py collectstatic --noinput --clear &&
         echo 'Starting Gunicorn...' &&
-        exec gunicorn config.wsgi:application
-        --bind 0.0.0.0:8000
-        --workers 3
-        --timeout 120
-        --access-logfile -
-        --error-logfile -
+        exec gunicorn config.wsgi:application \
+          --bind 0.0.0.0:8000 \
+          --workers ${GUNICORN_WORKERS:-3} \
+          --timeout ${GUNICORN_TIMEOUT:-120} \
+          --access-logfile - \
+          --error-logfile -
       "
     env_file:
       - .env
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings.development
-      POSTGRES_HOST: db
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      <<: *app-env
     ports:
       - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    depends_on: *app-depends
     healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/admin/')"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/ || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -73,50 +108,64 @@ services:
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
 
+  # ----------------------------------------------------------
+  # Celery worker
+  # ----------------------------------------------------------
   celery:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *app-build
     container_name: auth_celery
-    command: celery -A config worker --loglevel=info
+    command: >
+      celery -A config worker
+      --loglevel=info
+      --concurrency=${CELERY_CONCURRENCY:-4}
     env_file:
       - .env
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings.development
-      POSTGRES_HOST: db
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      <<: *app-env
+    depends_on: *app-depends
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1.0"
 
+  # ----------------------------------------------------------
+  # Celery Beat scheduler
+  # ----------------------------------------------------------
   celery-beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: *app-build
     container_name: auth_celery_beat
-    command: celery -A config beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    # --pidfile guards against duplicate beat instances on redeploy
+    command: >
+      celery -A config beat
+      --loglevel=info
+      --scheduler django_celery_beat.schedulers:DatabaseScheduler
+      --pidfile=/tmp/celerybeat.pid
     env_file:
       - .env
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings.development
-      POSTGRES_HOST: db
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/1
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      <<: *app-env
+    depends_on: *app-depends
     networks:
       - backend
     restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
 
 volumes:
   postgres_data:

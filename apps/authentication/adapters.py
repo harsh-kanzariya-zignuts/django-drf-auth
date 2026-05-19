@@ -6,6 +6,7 @@ from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from django.conf import settings
 
 from apps.authentication.tasks import (
+    send_password_reset_email_task,
     send_verification_email_task,
     send_welcome_email_task,
 )
@@ -163,14 +164,15 @@ class CustomAccountAdapter(DefaultAccountAdapter):
         """
         Called after email is verified - send welcome email
         """
+        already_verified = email_address.verified
         super().confirm_email(request, email_address)
-        user = email_address.user
 
-        # Send welcome email asynchronously
-        send_welcome_email_task.delay(
-            user_email=email_address.email,
-            user_name=user.full_name or user.email,
-        )
+        if not already_verified:  # only send welcome on first verification
+            user = email_address.user
+            send_welcome_email_task.delay(
+                user_email=email_address.email,
+                user_name=user.full_name or user.email,
+            )
 
     def send_mail(self, template_prefix, email, context):
         """
@@ -203,3 +205,14 @@ class CustomAccountAdapter(DefaultAccountAdapter):
         Generate frontend-based email confirmation URL
         """
         return f"{settings.FRONTEND_URL}/confirm-email/{emailconfirmation.key}/"
+
+    def send_password_reset_mail(self, request, email, context):
+        """Send password reset email asynchronously via Celery."""
+        user = context.get("user")
+        reset_url = context.get("password_reset_url", "")
+
+        send_password_reset_email_task.delay(
+            user_email=email,
+            reset_url=reset_url,
+            user_name=user.full_name or email if user else email,
+        )

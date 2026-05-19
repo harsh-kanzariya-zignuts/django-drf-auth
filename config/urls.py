@@ -3,6 +3,8 @@ from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.health.views import health_check
+
 urlpatterns = [
     path("admin/", admin.site.urls),
 
@@ -12,6 +14,9 @@ urlpatterns = [
     
     # REQUIRED for dj-rest-auth registration
     path("accounts/", include("allauth.urls")),
+    
+    # Lightweight health endpoint for container/load-balancer probes
+    path("health/", health_check, name="health_check"),
 ]
 
 # API Documentation - Only in development
