@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "whitenoise.runserver_nostatic",
     "drf_spectacular",
     "drf_spectacular_sidecar",
+    "django_celery_beat",
 
     # Authentication
     "allauth",
@@ -433,3 +434,37 @@ SPECTACULAR_SETTINGS = {
         },
     ],
 }
+
+# ==================== Celery Configuration ====================
+
+# Broker and Result Backend - Use Redis for both
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="redis://redis:6379/0")
+CELERY_RESULT_BACKEND = env("CELERY_RESULT_BACKEND", default="redis://redis:6379/1")
+
+# Accept content
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+
+# Timezone & limits
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+
+# Beat scheduler - stores periodic tasks in database
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
+
+# Result settings (Redis backend)
+CELERY_RESULT_EXPIRES = 3600  # 1 hour  
+CELERY_RESULT_EXTENDED = True
+CELERY_RESULT_BACKEND_ALWAYS_RETRY = True
+CELERY_RESULT_BACKEND_MAX_RETRIES = 3
+
+# Worker settings
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1  # Better for short tasks
+CELERY_WORKER_CONCURRENCY = 4
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+
+# Logging
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False

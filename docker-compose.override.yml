@@ -1,17 +1,44 @@
-# docker-compose.override.yml (for local dev only)
+# ============================================================
+# docker-compose.override.yml — local development only
+# Docker Compose loads this automatically alongside the base file.
+# ============================================================
+
 services:
   web:
     volumes:
       - .:/app  # Live code reload
+    # Override: skip gunicorn, use Django dev server instead
     command: >
       sh -c "
         echo 'Applying database migrations...' &&
         python manage.py migrate --noinput &&
-        echo 'Migrations complete.' &&
         echo 'Starting Django development server...' &&
         python manage.py runserver 0.0.0.0:8000
       "
     environment:
       DJANGO_DEBUG: "True"
+      # No need to repeat broker URLs — inherited from base via x-app-env anchor
     stdin_open: true
     tty: true
+
+  celery:
+    volumes:
+      - .:/app
+    environment:
+      DJANGO_DEBUG: "True"
+
+  celery-beat:
+    volumes:
+      - .:/app
+    environment:
+      DJANGO_DEBUG: "True"
+
+  # Expose PostgreSQL to host machine so you can connect with pgAdmin or similar tools
+  db:
+    ports:
+      - "127.0.0.1:5440:5432"
+
+  # Expose Redis to host machine so you can use Redis VS Code extension
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
